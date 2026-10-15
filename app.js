@@ -198,7 +198,8 @@ function monBody(p){
   ].join("");
   return `<div class="nature">Naturaleza ${nat}</div>${statsGrid(p)}
     <div><p class="sec-t">Movimientos</p><div class="moves">${p.movimientos.map(moveCard).join("") || '<span class="empty-msg">Sin movimientos</span>'}</div></div>
-    <div class="meta">${meta}</div>`;
+    <div class="meta">${meta}</div>
+    <button class="btn sm aprende-btn" type="button" data-especie="${p.num}">Qué movimientos aprende ${esc(p.nombre)}</button>`;
 }
 
 function monHead(p){
@@ -312,8 +313,9 @@ function cadena(texto){
   if (directo) h += `<p class="how" style="margin:0;color:var(--muted)">También salvaje: ${esc(directo)}</p>`;
   return h + "</div>";
 }
-function dexSheet(n){
+async function dexSheet(n){
   const p = DATA.pokedex.find(x => x.num === n);
+  if (!p) return especieSheet(n);  // fuera de la Pokédex de Kanto (p. ej. de las Islas Sete)
   const mios = [...DATA.equipo, ...DATA.cajas.flatMap(c => c.pokemon)].filter(m => m.num === n);
   let extra = "";
   if (p.grupo === "ya") extra = `<div><p class="sec-t">Lo puedes evolucionar</p><p class="how" style="margin:0">${esc(p.como)}</p></div>`;
@@ -325,8 +327,127 @@ function dexSheet(n){
       <h3>${esc(p.nombre)}</h3><div class="types">${p.tipos.map(typeChip).join("")}</div>
       <span class="pill" style="align-self:flex-start"><i class="mark ${p.estado}"></i>${ESTADO_TXT[p.estado]}</span>
       ${p.exclusivo ? '<span class="pill warn" style="align-self:flex-start">Exclusivo de Verde Hoja</span>' : ""}</div></div>
-    ${tuyos}${extra}<div><p class="sec-t">Cómo conseguirlo</p>${cadena(p.obtener)}</div>`);
+    ${tuyos}${extra}<div><p class="sec-t">Cómo conseguirlo</p>${cadena(p.obtener)}</div>${contenedorMovimientos(n)}`);
+  llenarMovimientos(n);
 }
+async function especieSheet(n){
+  openSheet('<p class="loading">Cargando datos del juego…</p>');
+  try { await cargarJuego(); } catch (e) { openSheet('<p class="err">No pude cargar los datos del juego. Revisa la conexión e intenta de nuevo.</p>'); return; }
+  const e = JUEGO.especies[n];
+  if (!e) { openSheet('<p class="err">No tengo datos de ese Pokémon.</p>'); return; }
+  openSheet(`<div class="sheet-top"><div class="well lg">${sprite(n)}</div><div class="info">
+      <span class="num" style="color:var(--muted);font-size:.8rem">#${String(n).padStart(3, "0")}</span>
+      <h3>${esc(e.nombre)}</h3><div class="types">${e.tipos.map(typeChip).join("")}</div></div></div>${contenedorMovimientos(n)}`);
+  llenarMovimientos(n);
+}
+
+/* ---------- Movimientos que aprende cada especie ---------- */
+
+const categoria = m => m.estado ? "Estado" : m.nombre === "Poder Oculto" ? "Tipo variable"
+  : (FISICOS.has(m.tipo) ? "Físico" : "Especial");
+let HIJOS = null;  // especie → sus evoluciones directas
+function familia(num){
+  if (!HIJOS) {
+    HIJOS = {};
+    for (const [n, e] of Object.entries(JUEGO.especies)) if (e.viene_de) (HIJOS[e.viene_de] ||= []).push(+n);
+  }
+  let base = String(num);
+  while (JUEGO.especies[base]?.viene_de && JUEGO.especies[JUEGO.especies[base].viene_de]) base = JUEGO.especies[base].viene_de;
+  const orden = [], cola = [+base];
+  while (cola.length){ const n = cola.shift(); orden.push(n); cola.push(...(HIJOS[n] || []).sort((a, b) => a - b)); }
+  return orden;
+}
+function preevoluciones(num){
+  const lista = [];
+  let actual = JUEGO.especies[num]?.viene_de;
+  while (actual && JUEGO.especies[actual]) { lista.push(+actual); actual = JUEGO.especies[actual].viene_de; }
+  return lista;
+}
+
+// Lo que aprende una especie, agrupado por método y ordenado (nivel, MT/MO, tutor, huevo).
+function aprendeDe(num){
+  const g = {nivel: [], mt: new Map(), tutor: new Map(), huevo: new Map()};
+  for (const [mov, formas] of Object.entries(JUEGO.especies[num].aprende)){
+    const m = JUEGO.movimientos[mov]; if (!m) continue;
+    for (const [metodo, nivel] of formas){
+      if (metodo === "nivel") g.nivel.push({mov, m, nivel});
+      else if (g[metodo]) g[metodo].set(mov, {mov, m});
+    }
+  }
+  const porNombreMov = (a, b) => a.m.nombre.localeCompare(b.m.nombre, "es");
+  const numeroMt = x => { const t = JUEGO.mt[x.mov] || ""; return (t.startsWith("MO") ? 100 : 0) + (parseInt(t.slice(2), 10) || 0); };
+  return {
+    nivel: g.nivel.sort((a, b) => a.nivel - b.nivel || porNombreMov(a, b)),
+    mt: [...g.mt.values()].sort((a, b) => numeroMt(a) - numeroMt(b)),
+    tutor: [...g.tutor.values()].sort(porNombreMov),
+    huevo: [...g.huevo.values()].sort(porNombreMov),
+  };
+}
+
+function filaMov(m, clave, extra = ""){
+  // Poder 1 en los datos = poder variable (Poder Oculto, Frustración…).
+  const det = [categoria(m), m.poder > 1 ? `Pot ${m.poder}` : null, m.precision ? `${m.precision}%` : null].filter(Boolean).join(" · ");
+  return `<li class="lm" style="${typeVars(m.tipo)}"><span class="lm-k num">${clave}</span>
+    <span class="lm-n"><b>${esc(m.nombre)}</b><small>${esc(det)}</small></span>${extra}<span class="type">${esc(m.tipo)}</span></li>`;
+}
+
+function contenedorMovimientos(n){
+  return `<div class="aprende" id="aprende" data-num="${n}"><p class="sec-t">Movimientos</p><p class="loading" style="padding:8px 0">Cargando movimientos…</p></div>`;
+}
+async function llenarMovimientos(n){
+  try { await cargarJuego(); } catch (e) {
+    const c = $("#aprende"); if (c) c.innerHTML = '<p class="err">No pude cargar los movimientos. Revisa la conexión.</p>';
+    return;
+  }
+  const c = $("#aprende");
+  if (!c || +c.dataset.num !== n || !JUEGO.especies[n]) return;  // se cerró o se abrió otra ficha
+  const fam = familia(n);
+  const etapas = fam.length > 1 ? `<div class="etapas" role="group" aria-label="Etapa evolutiva">${fam.map(f =>
+      `<button type="button" class="etapa" data-etapa="${f}" aria-pressed="${f === n}"><img class="spr" src="sprites/${f}.png" alt="" width="32" height="32" loading="lazy">${esc(JUEGO.especies[f].nombre)}</button>`).join("")}</div>` : "";
+  c.innerHTML = `<p class="sec-t">Movimientos</p>${etapas}<div id="aprende-etapa">${movimientosEtapa(n)}</div>`;
+}
+function movimientosEtapa(num){
+  const e = JUEGO.especies[num];
+  const g = aprendeDe(num);
+  const tuyas = new Set((DATA?.mochila || []).flatMap(b => b.objetos.map(o => o.nombre)));
+  let h = `<div class="lm-grupo"><p class="lm-t">Por nivel · ${esc(e.nombre)}</p><ul class="lm-list">${
+    g.nivel.map(x => filaMov(x.m, `Nv ${x.nivel}`)).join("") || '<li class="lm-vacio">No aprende nada por nivel.</li>'}</ul></div>`;
+
+  // Lo que aprenden sus preevoluciones por nivel y esta etapa ya no puede aprender de ninguna forma.
+  const antes = new Map();
+  for (const pre of preevoluciones(num)){
+    for (const [mov, formas] of Object.entries(JUEGO.especies[pre].aprende)){
+      const m = JUEGO.movimientos[mov];
+      if (!m || e.aprende[mov] || antes.has(mov)) continue;
+      const nivel = formas.filter(f => f[0] === "nivel" && f[1] > 1).map(f => f[1]).sort((a, b) => a - b)[0];
+      if (nivel) antes.set(mov, {m, nivel, de: JUEGO.especies[pre].nombre});
+    }
+  }
+  if (antes.size) h += `<div class="lm-grupo"><p class="lm-t">Solo antes de evolucionar</p>
+    <p class="lm-hint">${esc(e.nombre)} no los aprende: hay que enseñárselos a la preevolución antes de evolucionarla.</p>
+    <ul class="lm-list">${[...antes.values()].sort((a, b) => a.nivel - b.nivel)
+      .map(x => filaMov(x.m, `Nv ${x.nivel}`, `<span class="lm-de">como ${esc(x.de)}</span>`)).join("")}</ul></div>`;
+
+  const tengo = g.mt.filter(x => tuyas.has(JUEGO.mt[x.mov])).length;
+  h += `<details class="lm-det"><summary>MT y MO<span class="num">${g.mt.length}${tengo ? ` · ${tengo} en la mochila` : ""}</span></summary>
+    <ul class="lm-list">${g.mt.map(x => filaMov(x.m, esc(JUEGO.mt[x.mov] || "MT"),
+      tuyas.has(JUEGO.mt[x.mov]) ? '<span class="lm-ok" title="La tienes en la mochila">✓ la tienes</span>' : "")).join("")
+      || '<li class="lm-vacio">No puede aprender ninguna MT ni MO.</li>'}</ul></details>`;
+  if (g.tutor.length) h += `<details class="lm-det"><summary>Tutor (un solo uso)<span class="num">${g.tutor.length}</span></summary>
+    <ul class="lm-list">${g.tutor.map(x => filaMov(x.m, "Tutor")).join("")}</ul></details>`;
+  if (g.huevo.length) h += `<details class="lm-det"><summary>Huevo (crianza)<span class="num">${g.huevo.length}</span></summary>
+    <ul class="lm-list">${g.huevo.map(x => filaMov(x.m, "Huevo")).join("")}</ul></details>`;
+  return h;
+}
+$("#sheet-in").addEventListener("click", e => {
+  const b = e.target.closest(".etapa"); if (!b) return;
+  document.querySelectorAll("#aprende .etapa").forEach(x => x.setAttribute("aria-pressed", x === b));
+  $("#aprende-etapa").innerHTML = movimientosEtapa(+b.dataset.etapa);
+});
+// Botones "Qué aprende…" del equipo, el PC y los objetivos.
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-especie]"); if (b) dexSheet(+b.dataset.especie);
+});
 
 /* ---------- Objetivos ---------- */
 
@@ -439,7 +560,9 @@ function renderGoals(){
         ...(o.movimientos || c.movimientos || []).map(chipMovimiento),
         (o.objeto ?? c.objeto) ? `<span class="pill">Con ${esc(o.objeto ?? c.objeto)}</span>` : ""].join("");
       const cand = o.candidato;
-      return `<article class="goal"><div class="goal-top"><div class="well sm">${sprite(num)}</div>
+      const well = num ? `<button class="well sm" type="button" data-especie="${num}" aria-label="Qué movimientos aprende ${esc(nombre)}">${sprite(num)}</button>`
+        : `<div class="well sm"></div>`;
+      return `<article class="goal"><div class="goal-top">${well}
           <div class="info"><b>${esc(nombre)}</b>${(o.nota ?? c.nota) ? `<div class="note">${esc(o.nota ?? c.nota)}</div>` : ""}</div>
           <span class="state ${o.estado}">${ESTADOS[o.estado]}</span></div>
         ${want ? `<div class="want">${want}</div>` : ""}

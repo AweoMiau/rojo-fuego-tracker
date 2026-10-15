@@ -270,3 +270,37 @@ code{font-family:var(--mono);font-size:.82em;background:var(--surface-2);padding
 .avisos ul{margin:4px 0 0;padding-left:1.1em}
 .loading{color:var(--muted);padding:24px 0;text-align:center}
 body.setup nav.tabs,body.setup .status,body.setup .dexbar{display:none}
+
+/* Movimientos que aprende cada especie (ficha de la Pokédex) */
+button.well{border:0;padding:0;cursor:pointer}
+button.well:focus-visible{outline:2px solid var(--red);outline-offset:2px}
+.aprende-btn{align-self:flex-start}
+.aprende{display:flex;flex-direction:column;gap:10px}
+.aprende .sec-t{margin:0}
+.etapas{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}
+.etapa{flex:none;display:inline-flex;align-items:center;gap:4px;border:1.5px solid var(--line);background:var(--surface);
+  border-radius:999px;padding:2px 12px 2px 4px;font-size:.85rem;cursor:pointer}
+.etapa img{width:32px;height:32px}
+.etapa[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.etapa:focus-visible{outline:2px solid var(--red);outline-offset:2px}
+.lm-grupo{display:flex;flex-direction:column;gap:4px}
+.lm-t{font-weight:700;font-size:.9rem;margin:0}
+.lm-hint{font-size:.8rem;color:var(--muted);margin:0}
+.lm-list{list-style:none;margin:0;padding:0}
+.lm{display:grid;grid-template-columns:3.4em minmax(0,1fr) auto auto;gap:4px 8px;align-items:center;
+  padding:7px 0 7px 10px;border-top:1px solid var(--line);box-shadow:inset 3px 0 var(--tc)}
+.lm-k{font-size:.72rem;color:var(--muted);white-space:nowrap}
+.lm-n{min-width:0}
+.lm-n b{display:block;font-size:.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lm-n small{display:block;font-size:.72rem;color:var(--muted)}
+.lm .type{font-size:.62rem;padding:2px 7px}
+.lm-ok{font-size:.72rem;font-weight:700;color:var(--good);white-space:nowrap}
+.lm-de{font-size:.72rem;color:var(--gold);font-weight:700;white-space:nowrap}
+.lm-vacio{font-size:.85rem;color:var(--muted);padding:6px 0}
+.lm-det{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.lm-det summary{list-style:none;cursor:pointer;padding:10px 12px;display:flex;justify-content:space-between;gap:10px;font-weight:700;font-size:.9rem}
+.lm-det summary::-webkit-details-marker{display:none}
+.lm-det summary .num{font-weight:400;font-size:.75rem;color:var(--muted)}
+.lm-det summary:focus-visible{outline:2px solid var(--red);outline-offset:-2px}
+.lm-det .lm-list{padding:0 12px 6px}
+@media (max-width:380px){.lm{grid-template-columns:3.2em minmax(0,1fr) auto}.lm .type{display:none}}
