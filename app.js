@@ -1,9 +1,14 @@
 "use strict";
-// Tracker Rojo Fuego: lee tracker/datos.json del repo privado de saves (lo genera la
-// acción de GitHub con cada save) y edita objetivos.toml en ese mismo repo.
+// Tracker de Rojo Fuego y Verde Hoja: lee el datos.json de cada juego del repo privado de
+// saves (lo genera la acción de GitHub con cada save) y edita sus objetivos en ese mismo repo.
 
 const REPO_POR_DEFECTO = "AweoMiau/pokemon-rojo-fuego-saves";
-const CLAVES = {token: "rf-token", repo: "rf-repo", datos: "rf-datos", etag: "rf-etag", vista: "rf-vista"};
+const CLAVES = {token: "rf-token", repo: "rf-repo", datos: "rf-datos", etag: "rf-etag", vista: "rf-vista", juego: "rf-juego"};
+// Cada juego: dónde está su datos.json y su archivo de objetivos en el repo.
+const JUEGOS = {
+  rojo:  {nombre: "Rojo Fuego", otra: "Verde Hoja", json: "tracker/datos.json",       objetivos: "objetivos.toml"},
+  verde: {nombre: "Verde Hoja", otra: "Rojo Fuego", json: "tracker/verde/datos.json", objetivos: "objetivos_verde.toml"},
+};
 const guardado = {
   get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } },
   set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} },
@@ -30,6 +35,11 @@ const ORDEN = [0,1,2,4,5,3];                          // orden en que se muestra
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const typeVars = t => { const c = TIPOS[t] || TIPOS["???"]; return `--tc:${c[0]};--tt:${c[1]}`; };
+const juegoActivo = () => JUEGOS[guardado.get(CLAVES.juego)] ? guardado.get(CLAVES.juego) : "rojo";
+const J = () => JUEGOS[juegoActivo()];
+// La caché de Rojo Fuego conserva sus claves de siempre; las de otros juegos llevan sufijo.
+const claveDe = k => juegoActivo() === "rojo" ? CLAVES[k] : `${CLAVES[k]}-${juegoActivo()}`;
+const iniciales = nombre => nombre.split(" ").map(p => p[0]).join("");
 const typeChip = t => `<span class="type" style="${typeVars(t)}">${esc(t)}</span>`;
 const sprite = n => n ? `<img class="spr" src="sprites/${n}.png" alt="" width="64" height="64" loading="lazy">` : "";
 const sumaIV = p => p.iv.reduce((a, b) => a + b, 0);
@@ -68,8 +78,9 @@ async function cargarDatos(manual = false){
   if (cargando || !guardado.get(CLAVES.token)) return;
   cargando = true; ultimaRevision = Date.now(); estado("Buscando…", true);
   try {
-    const etag = DATA ? guardado.get(CLAVES.etag) : null;
-    const r = await api("tracker/datos.json", {headers: {
+    const juego = juegoActivo();
+    const etag = DATA ? guardado.get(claveDe("etag")) : null;
+    const r = await api(J().json, {headers: {
       Accept: "application/vnd.github.raw+json", ...(etag ? {"If-None-Match": etag} : {})}});
     if (r.status === 304) {
       estado(`Al día · ${hora()}`);
@@ -82,11 +93,12 @@ async function cargarDatos(manual = false){
       return;
     }
     const texto = await r.text();
+    if (juego !== juegoActivo()) return;  // se cambió de juego mientras se descargaba
     const nuevo = JSON.parse(texto);
     const antes = DATA?.save?.fecha;
     DATA = nuevo;
-    guardado.set(CLAVES.datos, texto);
-    guardado.set(CLAVES.etag, r.headers.get("ETag") || "");
+    guardado.set(claveDe("datos"), texto);
+    guardado.set(claveDe("etag"), r.headers.get("ETag") || "");
     renderTodo();
     estado(`Al día · ${hora()}`);
     if (antes && nuevo.save && nuevo.save.fecha !== antes) toast(`Save nuevo: «${nuevo.save.mensaje}»`);
@@ -133,7 +145,7 @@ function salirSetup(){
 $("#btn-ajustes").addEventListener("click", () => mostrarSetup(!!guardado.get(CLAVES.token)));
 $("#btn-cancelar-setup").addEventListener("click", salirSetup);
 $("#btn-desconectar").addEventListener("click", () => {
-  Object.values(CLAVES).forEach(guardado.del);
+  Object.values(CLAVES).forEach(k => { guardado.del(k); Object.keys(JUEGOS).forEach(j => guardado.del(`${k}-${j}`)); });
   DATA = null; renderTodo(); mostrarSetup(false);
 });
 $("#f-setup").addEventListener("submit", async e => {
@@ -148,6 +160,7 @@ $("#f-setup").addEventListener("submit", async e => {
     const texto = await r.text();
     DATA = JSON.parse(texto);
     guardado.set(CLAVES.token, token); guardado.set(CLAVES.repo, nombreRepo);
+    guardado.set(CLAVES.juego, "rojo");
     guardado.set(CLAVES.datos, texto); guardado.set(CLAVES.etag, r.headers.get("ETag") || "");
     renderTodo(); estado(`Al día · ${hora()}`); salirSetup();
     toast("Conectado. Los datos se actualizan solos con cada save.");
@@ -277,17 +290,17 @@ const FILTROS = [
   ["visto", "Vistos", p => p.estado === "visto"],
   ["faltan", "Te faltan", p => p.estado !== "tengo" && p.estado !== "registrado"],
   ["ya", "Evolucionables ya", p => p.grupo === "ya"],
-  ["vh", "Verde Hoja", p => p.exclusivo === "verde_hoja"],
+  ["exclusivo", null, p => !!p.exclusivo],  // el título sale del juego: "Rojo Fuego" o "Verde Hoja"
 ];
 let filtro = "todos";
 function renderDex(){
   $("#dex-filters").innerHTML = FILTROS.map(([k, t, f]) =>
-    `<button class="chip" type="button" data-f="${k}" aria-pressed="${k === filtro}">${t}<span class="c">${DATA.pokedex.filter(f).length}</span></button>`).join("");
+    `<button class="chip" type="button" data-f="${k}" aria-pressed="${k === filtro}">${t || "Exclusivos de " + esc(otraVersion())}<span class="c">${DATA.pokedex.filter(f).length}</span></button>`).join("");
   const q = $("#dex-q").value.trim().toLowerCase();
   const f = FILTROS.find(x => x[0] === filtro)[2];
   const lista = DATA.pokedex.filter(p => f(p) && (!q || p.nombre.toLowerCase().includes(q) || String(p.num).padStart(3, "0").includes(q)));
   $("#dex").innerHTML = lista.map(p => `<button class="cell ${p.estado}" type="button" data-n="${p.num}" aria-label="${esc(p.nombre)}">
-      ${p.exclusivo ? '<span class="vh">VH</span>' : ""}<i class="mark ${p.estado}"></i>
+      ${p.exclusivo ? `<span class="vh">${iniciales(otraVersion())}</span>` : ""}<i class="mark ${p.estado}"></i>
       <span class="w">${sprite(p.num)}</span><span class="n">#${String(p.num).padStart(3, "0")}</span><span class="nm">${esc(p.nombre)}</span></button>`).join("")
     || '<p class="empty-msg">Ningún Pokémon coincide.</p>';
 }
@@ -299,13 +312,14 @@ const ESTADO_TXT = {tengo: "Lo tienes", registrado: "Registrado, pero ya no lo t
 function cadena(texto){
   // "Gastly en Torre…; … → Haunter (nivel 25) → Gengar (intercambio) · o directo: …"
   let [principal, directo] = texto.split(" · o directo: ");
+  const prefijo = `En ${otraVersion()}: `;
   let vh = false;
-  if (principal.startsWith("En Verde Hoja: ")) { vh = true; principal = principal.slice(15); }
+  if (principal.startsWith(prefijo)) { vh = true; principal = principal.slice(prefijo.length); }
   if (principal.startsWith("Solo por evento")) return `<p class="how">${esc(principal)}</p>`;
   const partes = principal.split(" → ");
   const [nombre, ...resto] = partes[0].split(" en ");
   let h = `<div class="chain"><div class="step"><span class="w">${sprite(porNombre[nombre])}</span>
-    <span class="t"><b>${esc(nombre)}</b>${vh ? "En Verde Hoja: " : ""}${esc(resto.join(" en "))}</span></div>`;
+    <span class="t"><b>${esc(nombre)}</b>${vh ? esc(prefijo) : ""}${esc(resto.join(" en "))}</span></div>`;
   for (const p of partes.slice(1)){
     const m = p.match(/^(.*) \((.*)\)$/) || [p, p, ""];
     h += `<div class="arrow">↓ ${esc(m[2])}</div><div class="step"><span class="w">${sprite(porNombre[m[1]])}</span><span class="t"><b>${esc(m[1])}</b></span></div>`;
@@ -326,7 +340,7 @@ async function dexSheet(n){
       <span class="num" style="color:var(--muted);font-size:.8rem">#${String(n).padStart(3, "0")}</span>
       <h3>${esc(p.nombre)}</h3><div class="types">${p.tipos.map(typeChip).join("")}</div>
       <span class="pill" style="align-self:flex-start"><i class="mark ${p.estado}"></i>${ESTADO_TXT[p.estado]}</span>
-      ${p.exclusivo ? '<span class="pill warn" style="align-self:flex-start">Exclusivo de Verde Hoja</span>' : ""}</div></div>
+      ${p.exclusivo ? `<span class="pill warn" style="align-self:flex-start">Exclusivo de ${esc(otraVersion())}</span>` : ""}</div></div>
     ${tuyos}${extra}<div><p class="sec-t">Cómo conseguirlo</p>${cadena(p.obtener)}</div>${contenedorMovimientos(n)}`);
   llenarMovimientos(n);
 }
@@ -504,7 +518,7 @@ const ordenado = o => o && typeof o === "object" && !Array.isArray(o)
   ? Object.fromEntries(Object.keys(o).sort().map(k => [k, ordenado(o[k])])) : o;
 
 async function leerObjetivosRepo(){
-  const r = await api("objetivos.toml", {headers: {Accept: "application/vnd.github+json"}});
+  const r = await api(J().objetivos, {headers: {Accept: "application/vnd.github+json"}});
   if (r.status === 404) return {sha: null, config: {pokemon: [], objetos: []}, cabecera: CABECERA};
   if (!r.ok) throw new Error(errorGitHub(r.status));
   const j = await r.json();
@@ -515,7 +529,7 @@ async function guardarObjetivosRepo(cambio, mensaje){
   cambio(actual.config);  // puede lanzar un Error si el archivo cambió
   const cuerpo = {message: mensaje, content: aBase64(escribirToml(actual.config, actual.cabecera))};
   if (actual.sha) cuerpo.sha = actual.sha;
-  const r = await api("objetivos.toml", {method: "PUT", headers: {Accept: "application/vnd.github+json"}, body: JSON.stringify(cuerpo)});
+  const r = await api(J().objetivos, {method: "PUT", headers: {Accept: "application/vnd.github+json"}, body: JSON.stringify(cuerpo)});
   if (!r.ok) throw new Error(errorGitHub(r.status));
   pendiente = {config: actual.config};
   rapidoHasta = Date.now() + 3 * 60 * 1000;
@@ -659,7 +673,7 @@ function opcionesMovimientos(num, elegido){
       `<option value="${esc(f.mov.nombre)}"${f.mov.nombre === elegido ? " selected" : ""}>${esc(f.mov.nombre)} · ${esc(f.formas.map(x => x.txt).join(", "))}</option>`).join("") + "</optgroup>";
   }
   if (elegido && !aprendibles(num).some(f => f.mov.nombre === elegido))
-    h += `<option value="${esc(elegido)}" selected>${esc(elegido)} (no lo aprende en Rojo Fuego)</option>`;
+    h += `<option value="${esc(elegido)}" selected>${esc(elegido)} (no lo aprende en ${esc(nombreJuego())})</option>`;
   return h;
 }
 
@@ -683,7 +697,7 @@ async function abrirEditor(o){
         <label for="o-naturaleza">Naturaleza</label>
         <select id="o-naturaleza"><option value="">Cualquiera</option>${naturalezas}</select>
         <label>Movimientos</label>
-        <span class="hint">Solo aparecen los que puede aprender en Rojo Fuego, con cómo se aprenden.</span>
+        <span class="hint">Solo aparecen los que puede aprender en ${esc(nombreJuego())}, con cómo se aprenden.</span>
         ${[0, 1, 2, 3].map(i => `<select id="o-mov${i}" aria-label="Movimiento ${i + 1}">${opcionesMovimientos(num, movs[i])}</select>`).join("")}
         <label for="o-objeto">Objeto equipado</label>
         <input id="o-objeto" list="dl-objetos" autocomplete="off" placeholder="Ej: Restos (opcional)" value="${esc(c.objeto || "")}">
@@ -794,9 +808,34 @@ function renderTrainer(){
   $("#t-save").textContent = DATA.save ? `Save del ${DATA.save.fecha} · «${DATA.save.mensaje}»` : "";
 }
 
+// Selector de juego: aparece cuando hay más de un juego con save.
+function renderJuegos(){
+  const lista = (DATA?.juegos || []).filter(j => JUEGOS[j.clave]);
+  if (lista.length > 1) guardado.set("rf-juegos", JSON.stringify(lista.map(j => j.clave)));
+  let claves = lista.map(j => j.clave);
+  try { if (claves.length < 2) claves = JSON.parse(guardado.get("rf-juegos") || "[]"); } catch (e) { claves = []; }
+  const caja = $("#t-juegos");
+  caja.hidden = claves.length < 2;
+  caja.innerHTML = claves.map(k => `<button type="button" data-j="${k}" aria-pressed="${k === juegoActivo()}">${esc(JUEGOS[k].nombre)}</button>`).join("");
+  document.body.dataset.juego = juegoActivo();
+}
+$("#t-juegos").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b || b.dataset.j === juegoActivo()) return;
+  guardado.set(CLAVES.juego, b.dataset.j);
+  try { DATA = JSON.parse(guardado.get(claveDe("datos")) || "null"); } catch (err) { DATA = null; }
+  pendiente = null; filtro = "todos";
+  renderTodo();
+  if (!DATA) $("#team").innerHTML = '<p class="loading">Cargando tu partida…</p>';
+  cargarDatos();
+});
+const nombreJuego = () => DATA?.juego?.nombre || J().nombre;
+const otraVersion = () => DATA?.juego?.otra || J().otra;
+
 function renderTodo(){
+  renderJuegos();
+  document.title = `Tracker ${nombreJuego()}`;
   if (!DATA) {
-    $("#t-name").textContent = "Rojo Fuego"; $("#t-id").textContent = ""; $("#t-badges").innerHTML = ""; $("#t-save").textContent = "";
+    $("#t-name").textContent = nombreJuego(); $("#t-id").textContent = ""; $("#t-badges").innerHTML = ""; $("#t-save").textContent = "";
     return;
   }
   porNombre = Object.fromEntries(DATA.pokedex.map(p => [p.nombre, p.num]));
@@ -819,7 +858,7 @@ document.querySelector("nav.tabs").addEventListener("click", e => { const b = e.
 
 /* ---------- Inicio ---------- */
 
-try { DATA = JSON.parse(guardado.get(CLAVES.datos) || "null"); } catch (e) { DATA = null; }
+try { DATA = JSON.parse(guardado.get(claveDe("datos")) || "null"); } catch (e) { DATA = null; }
 if (!guardado.get(CLAVES.token)) {
   mostrarSetup(false);
 } else {

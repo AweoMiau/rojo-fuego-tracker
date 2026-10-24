@@ -38,6 +38,11 @@ img.spr{image-rendering:pixelated;display:block;max-width:100%;height:auto}
 .trainer .row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
 .trainer h1{font-family:var(--display);font-weight:700;font-size:1.7rem;margin:0;letter-spacing:.5px;text-wrap:balance}
 .trainer .id{font-family:var(--mono);font-size:.78rem;opacity:.9}
+/* Selector de juego (Rojo Fuego / Verde Hoja) y color de la cabecera según el juego */
+.trainer .juegos{margin:8px 0 4px;background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.5)}
+.trainer .juegos button{color:inherit}
+.trainer .juegos button[aria-pressed="true"]{background:#fff;color:var(--red)}
+body[data-juego="verde"]{--red:#2e7d32}
 .badges{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
 .badge{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-family:var(--display);font-size:.8rem;
   border:2px solid rgba(255,255,255,.55);color:rgba(255,255,255,.55)}
